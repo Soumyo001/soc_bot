@@ -183,6 +183,7 @@ async def main():
     tg_app.add_handler(CommandHandler("stop", cmd_stop))
     tg_app.add_handler(CommandHandler("admins", cmd_admins))
     tg_app.add_handler(CommandHandler("testalert", cmd_testalert))
+    tg_app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     tg_app.add_handler(CommandHandler("help", cmd_help))
 
     print(f"[DEBUG] Current admins: {list_admin_chat_ids()}")
