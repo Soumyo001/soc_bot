@@ -1,10 +1,10 @@
-# soc_bot.py
+import asyncio
 import json
 import os
-import signal
-import multiprocessing
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import signal
+import platform
 
 from fastapi import FastAPI
 import uvicorn
@@ -21,7 +21,9 @@ ADMIN_FILE = DATA_DIR / "admins.json"
 
 def load_env(name: str, default: Optional[str] = None) -> Optional[str]:
     v = os.environ.get(name)
-    return v.strip() if v else default
+    if v is None:
+        return default
+    return v.strip()
 
 BOT_TOKEN = load_env("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -43,8 +45,7 @@ def read_admins() -> List[Dict[str, Any]]:
 
 def write_admins(admins: List[Dict[str, Any]]) -> None:
     tmp = ADMIN_FILE.with_suffix(".json.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump({"admins": admins}, f, indent=2)
+    json.dump({"admins": admins}, tmp.open("w", encoding="utf-8"), indent=2)
     tmp.replace(ADMIN_FILE)
 
 def add_admin(chat_id: int, username: Optional[str]) -> bool:
@@ -57,10 +58,11 @@ def add_admin(chat_id: int, username: Optional[str]) -> bool:
 
 def remove_admin(chat_id: int) -> bool:
     admins = read_admins()
-    new_admins = [a for a in admins if a["chat_id"] != chat_id]
-    if len(new_admins) == len(admins):
+    n = len(admins)
+    admins = [a for a in admins if a["chat_id"] != chat_id]
+    if len(admins) == n:
         return False
-    write_admins(new_admins)
+    write_admins(admins)
     return True
 
 def list_admin_chat_ids() -> List[int]:
@@ -155,42 +157,43 @@ api = FastAPI(title="SOC Bot Health Check")
 async def health():
     return {"ok": True}
 
-# =============== Run uvicorn in separate process ================
+# ===================== Main ==============================
 
-def run_uvicorn_process():
-    """
-    Start uvicorn as a child process so its event loop
-    doesn't interfere with telegram polling in the main process.
-    Use module import string so uvicorn imports this file's `api`.
-    """
-    # 'soc_bot:api' assumes this file is named soc_bot.py in container.
-    uvicorn.run("soc_bot:api", host="0.0.0.0", port=8080, log_level="info")
+async def main():
+    tg_app = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
+    tg_app.add_handler(CommandHandler("start", cmd_start))
+    tg_app.add_handler(CommandHandler("stop", cmd_stop))
+    tg_app.add_handler(CommandHandler("admins", cmd_admins))
+    tg_app.add_handler(CommandHandler("testalert", cmd_testalert))
+    tg_app.add_handler(CommandHandler("help", cmd_help))
+    await tg_app.initialize()
+    await tg_app.start()
+    await tg_app.updater.start_polling(drop_pending_updates=True)
 
-# ===================== Main (polling) ==============================
+    # Run FastAPI server on port 8080 for Render
+    async def run_uvicorn():
+        config = uvicorn.Config(api, host="0.0.0.0", port=8080, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
 
-def main():
-    # start uvicorn in separate process
-    uv_proc = multiprocessing.Process(target=run_uvicorn_process, daemon=True)
-    uv_proc.start()
-
-    # build and run telegram bot (polling) — blocking call, single loop
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("stop", cmd_stop))
-    app.add_handler(CommandHandler("admins", cmd_admins))
-    app.add_handler(CommandHandler("testalert", cmd_testalert))
-    app.add_handler(CommandHandler("help", cmd_help))
-
-    try:
-        # Blocking; this runs until interrupted.
-        app.run_polling(drop_pending_updates=True)
-    except (KeyboardInterrupt, SystemExit):
-        pass
-    finally:
-        # cleanup uvicorn process
-        if uv_proc.is_alive():
-            uv_proc.terminate()
-            uv_proc.join(timeout=5)
+    await asyncio.gather(run_uvicorn(), asyncio.Event().wait())
 
 if __name__ == "__main__":
-    main()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, loop.stop)
+        except NotImplementedError:
+            pass
+    try:
+        loop.run_until_complete(main())
+    finally:
+        pending = asyncio.all_tasks(loop)
+        for t in pending:
+            t.cancel()
+        try:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception:
+            pass
+        loop.close()
