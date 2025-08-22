@@ -163,6 +163,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stop - Unregister from receiving SOC alerts.\n"
         "/admins - List all registered admins.\n"
         "/testalert - Send a test alert to all registered admins.\n"
+        "/broadcast <message> - Send a custom message to all admins.\n"
         "/help - Show this help message.\n"
     )
     await update.message.reply_text(escape_md(help_text), parse_mode=ParseMode.MARKDOWN_V2)
