@@ -20,13 +20,13 @@ ADMIN_FILE = DATA_DIR / "admins.json"
 
 def load_env(name: str, default: Optional[str] = None) -> Optional[str]:
     v = os.environ.get(name)
-    return v.strip() if v else default
+    if v is None:
+        return default
+    return v.strip()
 
 BOT_TOKEN = load_env("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise SystemExit("BOT_TOKEN is required")
-
-SUPER_ADMIN_IDS = {int(x) for x in (load_env("SUPER_ADMIN_IDS", "") or "").split(",") if x.strip()}
+    raise SystemExit("BOT_TOKEN is required (from BotFather). Put it in environment variables")
 
 # =================== Admin storage ========================
 
@@ -51,7 +51,6 @@ def add_admin(chat_id: int, username: Optional[str]) -> bool:
         return False
     admins.append({"chat_id": chat_id, "username": username})
     write_admins(admins)
-    print(f"[DEBUG] Added admin: {chat_id} ({username})")
     return True
 
 def remove_admin(chat_id: int) -> bool:
@@ -61,7 +60,6 @@ def remove_admin(chat_id: int) -> bool:
     if len(admins) == n:
         return False
     write_admins(admins)
-    print(f"[DEBUG] Removed admin: {chat_id}")
     return True
 
 def list_admin_chat_ids() -> List[int]:
@@ -115,10 +113,6 @@ async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-    chat = update.effective_chat
-    if chat.id not in list_admin_chat_ids():
-        await update.message.reply_text("❌ Only registered admins can broadcast alerts.")
-        return
     text = "🔥 *Test Alert from SOC Bot*"
     targets = list_admin_chat_ids()
     if not targets:
@@ -139,12 +133,12 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - Register yourself to receive SOC alerts.\n"
         "/stop - Unregister from receiving SOC alerts.\n"
         "/admins - List all registered admins.\n"
-        "/testalert - Send a test alert to all registered admins (admins only).\n"
+        "/testalert - Send a test alert to all registered admins.\n"
         "/help - Show this help message.\n"
     )
     await update.message.reply_text(escape_md(help_text), parse_mode=ParseMode.MARKDOWN_V2)
 
-# ================= FastAPI for health check ==================
+# ================= FastAPI for Render port detection ==================
 
 api = FastAPI(title="SOC Bot Health Check")
 
@@ -161,6 +155,9 @@ async def main():
     tg_app.add_handler(CommandHandler("admins", cmd_admins))
     tg_app.add_handler(CommandHandler("testalert", cmd_testalert))
     tg_app.add_handler(CommandHandler("help", cmd_help))
+
+    print(f"[DEBUG] Current admins: {list_admin_chat_ids()}")
+
     await tg_app.initialize()
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
