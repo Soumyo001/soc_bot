@@ -65,6 +65,26 @@ def remove_admin(chat_id: int) -> bool:
 def list_admin_chat_ids() -> List[int]:
     return [a["chat_id"] for a in read_admins()]
 
+# ================= Helpers =================
+
+def severity_icon(sev: int) -> str:
+    sev = max(0, min(10, int(sev)))
+    return ["🟢","🟢","🟢","🟡","🟡","🟡","🟠","🟠","🔴","🔴","🔥"][sev]
+
+def escape_md(text: str) -> str:
+    for ch in r"\_*[]()~`>#+-=|{}.!":
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+def format_alert(summary: str, severity: int, details: Optional[Dict[str, Any]]=None, tags: Optional[List[str]]=None) -> str:
+    t = f"{severity_icon(severity)} *{escape_md(summary)}*"
+    if tags:
+        t += " " + " ".join(f"#{escape_md(x)}" for x in tags)
+    if details:
+        pretty = json.dumps(details, indent=2, ensure_ascii=False)
+        t += f"\n*Details:*\n```\n{pretty}\n```"
+    return t
+
 # ================= Telegram handlers =====================
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,8 +152,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/testalert - Send a test alert to all registered admins. (Super admins only)\n"
         "/help - Show this help message.\n"
     )
-    
-    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
+
+    await update.message.reply_text(escape_md(help_text), parse_mode=ParseMode.MARKDOWN_V2)
 
 # ===================== Main ==============================
 
