@@ -161,20 +161,34 @@ async def main():
     tg_app.add_handler(CommandHandler("admins", cmd_admins))
     tg_app.add_handler(CommandHandler("testalert", cmd_testalert))
     tg_app.add_handler(CommandHandler("help", cmd_help))
-
-    print(f"[DEBUG] SUPER_ADMIN_IDS: {SUPER_ADMIN_IDS}")
-    print(f"[DEBUG] Current admins: {list_admin_chat_ids()}")
-
     await tg_app.initialize()
-    await tg_app.run_polling(drop_pending_updates=True)
+    await tg_app.start()
+    await tg_app.updater.start_polling(drop_pending_updates=True)
 
+    # Run FastAPI server on port 8080 for Render
     async def run_uvicorn():
         config = uvicorn.Config(api, host="0.0.0.0", port=8080, log_level="info")
         server = uvicorn.Server(config)
         await server.serve()
 
-    # Run FastAPI alongside Telegram bot
     await asyncio.gather(run_uvicorn(), asyncio.Event().wait())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, loop.stop)
+        except NotImplementedError:
+            pass
+    try:
+        loop.run_until_complete(main())
+    finally:
+        pending = asyncio.all_tasks(loop)
+        for t in pending:
+            t.cancel()
+        try:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception:
+            pass
+        loop.close()
