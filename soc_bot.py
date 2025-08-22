@@ -125,6 +125,35 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
     await update.message.reply_text("✅ Test alert broadcasted.")
 
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    chat = update.effective_chat
+    if not chat:
+        return
+
+    admins = list_admin_chat_ids()
+    if chat.id not in admins:
+        await update.message.reply_text("❌ Only registered admins can broadcast messages.")
+        return
+
+    text = update.message.text
+    if len(text.split(maxsplit=1)) < 2:
+        await update.message.reply_text("⚠️ Usage: /broadcast <your message>")
+        return
+
+    # Extract the message to broadcast
+    message_to_send = text.split(maxsplit=1)[1]
+
+    for cid in admins:
+        try:
+            if cid != chat.id:  # optionally skip sending to the sender themselves
+                await context.bot.send_message(chat_id=cid, text=escape_md(message_to_send), parse_mode=ParseMode.MARKDOWN_V2)
+        except Exception:
+            pass
+
+    await update.message.reply_text("✅ Broadcast sent to all admins.")
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
