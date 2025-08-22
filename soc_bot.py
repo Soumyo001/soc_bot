@@ -118,6 +118,23 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
     await update.message.reply_text("✅ Test alert broadcasted.")
 
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat = update.effective_chat
+    if chat is None:
+        return
+    
+    help_text = (
+        "🛡️ *SOC Bot Commands:*\n\n"
+        "/start - Register yourself to receive SOC alerts.\n"
+        "/stop - Unregister from receiving SOC alerts.\n"
+        "/admins - List all registered admins. (Super admins only)\n"
+        "/testalert - Send a test alert to all registered admins. (Super admins only)\n"
+        "/help - Show this help message.\n"
+    )
+    
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
+
 # ===================== Main ==============================
 
 async def main():
@@ -126,6 +143,7 @@ async def main():
     tg_app.add_handler(CommandHandler("stop", cmd_stop))
     tg_app.add_handler(CommandHandler("admins", cmd_admins))
     tg_app.add_handler(CommandHandler("testalert", cmd_testalert))
+    tg_app.add_handler(CommandHandler("help", cmd_help))
     await tg_app.initialize()
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
