@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import signal
-import platform
 
 from fastapi import FastAPI
 import uvicorn
@@ -21,13 +20,11 @@ ADMIN_FILE = DATA_DIR / "admins.json"
 
 def load_env(name: str, default: Optional[str] = None) -> Optional[str]:
     v = os.environ.get(name)
-    if v is None:
-        return default
-    return v.strip()
+    return v.strip() if v else default
 
 BOT_TOKEN = load_env("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise SystemExit("BOT_TOKEN is required (from BotFather). Put it in environment variables")
+    raise SystemExit("BOT_TOKEN is required")
 
 SUPER_ADMIN_IDS = {int(x) for x in (load_env("SUPER_ADMIN_IDS", "") or "").split(",") if x.strip()}
 
@@ -54,6 +51,7 @@ def add_admin(chat_id: int, username: Optional[str]) -> bool:
         return False
     admins.append({"chat_id": chat_id, "username": username})
     write_admins(admins)
+    print(f"[DEBUG] Added admin: {chat_id} ({username})")
     return True
 
 def remove_admin(chat_id: int) -> bool:
@@ -63,6 +61,7 @@ def remove_admin(chat_id: int) -> bool:
     if len(admins) == n:
         return False
     write_admins(admins)
+    print(f"[DEBUG] Removed admin: {chat_id}")
     return True
 
 def list_admin_chat_ids() -> List[int]:
@@ -74,12 +73,6 @@ def escape_md(text: str) -> str:
     for ch in r"\_*[]()~`>#+-=|{}.!":
         text = text.replace(ch, f"\\{ch}")
     return text
-
-def is_admin(user_id: int) -> bool:
-    """Check if a user is an admin (super admin or registered in admins.json)."""
-    if user_id in SUPER_ADMIN_IDS:
-        return True
-    return user_id in list_admin_chat_ids()
 
 # ================= Telegram handlers =====================
 
@@ -99,12 +92,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-    user = update.effective_user
     chat = update.effective_chat
     if not chat:
-        return
-    if not is_admin(user.id):
-        await update.message.reply_text("❌ You are not authorized to use this command.")
         return
     removed = remove_admin(chat.id)
     await update.message.reply_text(
@@ -114,10 +103,6 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
-        return
-    user = update.effective_user
-    if not is_admin(user.id):
-        await update.message.reply_text("❌ Admin-only command.")
         return
     admins = read_admins()
     if not admins:
@@ -130,9 +115,9 @@ async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-    user = update.effective_user
-    if not is_admin(user.id):
-        await update.message.reply_text("❌ Admin-only command.")
+    chat = update.effective_chat
+    if chat.id not in list_admin_chat_ids():
+        await update.message.reply_text("❌ Only registered admins can broadcast alerts.")
         return
     text = "🔥 *Test Alert from SOC Bot*"
     targets = list_admin_chat_ids()
@@ -153,13 +138,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🛡️ *SOC Bot Commands:*\n\n"
         "/start - Register yourself to receive SOC alerts.\n"
         "/stop - Unregister from receiving SOC alerts.\n"
-        "/admins - List all registered admins. (Super admins only)\n"
-        "/testalert - Send a test alert to all registered admins. (Super admins only)\n"
+        "/admins - List all registered admins.\n"
+        "/testalert - Send a test alert to all registered admins (admins only).\n"
         "/help - Show this help message.\n"
     )
     await update.message.reply_text(escape_md(help_text), parse_mode=ParseMode.MARKDOWN_V2)
 
-# ================= FastAPI for Render port detection ==================
+# ================= FastAPI for health check ==================
 
 api = FastAPI(title="SOC Bot Health Check")
 
@@ -176,34 +161,20 @@ async def main():
     tg_app.add_handler(CommandHandler("admins", cmd_admins))
     tg_app.add_handler(CommandHandler("testalert", cmd_testalert))
     tg_app.add_handler(CommandHandler("help", cmd_help))
-    await tg_app.initialize()
-    await tg_app.start()
-    await tg_app.updater.start_polling(drop_pending_updates=True)
 
-    # Run FastAPI server on port 8080 for Render
+    print(f"[DEBUG] SUPER_ADMIN_IDS: {SUPER_ADMIN_IDS}")
+    print(f"[DEBUG] Current admins: {list_admin_chat_ids()}")
+
+    await tg_app.initialize()
+    await tg_app.run_polling(drop_pending_updates=True)
+
     async def run_uvicorn():
         config = uvicorn.Config(api, host="0.0.0.0", port=8080, log_level="info")
         server = uvicorn.Server(config)
         await server.serve()
 
+    # Run FastAPI alongside Telegram bot
     await asyncio.gather(run_uvicorn(), asyncio.Event().wait())
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, loop.stop)
-        except NotImplementedError:
-            pass
-    try:
-        loop.run_until_complete(main())
-    finally:
-        pending = asyncio.all_tasks(loop)
-        for t in pending:
-            t.cancel()
-        try:
-            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        except Exception:
-            pass
-        loop.close()
+    asyncio.run(main())
