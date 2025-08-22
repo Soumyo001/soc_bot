@@ -78,9 +78,11 @@ def escape_md(text: str) -> str:
 # ================= Telegram handlers =====================
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     user = update.effective_user
     chat = update.effective_chat
-    if chat is None:
+    if not chat:
         return
     added = add_admin(chat.id, user.username if user else None)
     await update.message.reply_text(
@@ -89,8 +91,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     chat = update.effective_chat
-    if chat is None:
+    if not chat:
         return
     removed = remove_admin(chat.id)
     await update.message.reply_text(
@@ -99,6 +103,8 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     user = update.effective_user
     if user and user.id not in SUPER_ADMIN_IDS:
         await update.message.reply_text("❌ Admin-only command.")
@@ -112,6 +118,8 @@ async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(escape_md(txt), parse_mode=ParseMode.MARKDOWN_V2)
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     user = update.effective_user
     if user and user.id not in SUPER_ADMIN_IDS:
         await update.message.reply_text("❌ Admin-only command.")
@@ -129,8 +137,7 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Test alert broadcasted.")
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    if chat is None:
+    if not update.message:
         return
     help_text = (
         "🛡️ *SOC Bot Commands:*\n\n"

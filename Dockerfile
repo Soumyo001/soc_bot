@@ -2,7 +2,7 @@
 FROM python:3.12.11-slim
 
 # -------------------- Metadata -----------------------
-LABEL maintainer="YourName <your.email@example.com>"
+LABEL maintainer="www.soumyo@gmail.com"
 LABEL description="SOC Bot - Telegram bot for centralized alerts"
 
 # -------------------- Working directory -------------
