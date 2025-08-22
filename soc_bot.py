@@ -6,13 +6,16 @@ from typing import List, Dict, Any, Optional
 import signal
 import platform
 
+from fastapi import FastAPI
+import uvicorn
+
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ==================== Config & Paths ======================
 
-DATA_DIR = Path("data")       # centralized admins.json inside repo/container
+DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 ADMIN_FILE = DATA_DIR / "admins.json"
 
@@ -67,23 +70,10 @@ def list_admin_chat_ids() -> List[int]:
 
 # ================= Helpers =================
 
-def severity_icon(sev: int) -> str:
-    sev = max(0, min(10, int(sev)))
-    return ["🟢","🟢","🟢","🟡","🟡","🟡","🟠","🟠","🔴","🔴","🔥"][sev]
-
 def escape_md(text: str) -> str:
     for ch in r"\_*[]()~`>#+-=|{}.!":
         text = text.replace(ch, f"\\{ch}")
     return text
-
-def format_alert(summary: str, severity: int, details: Optional[Dict[str, Any]]=None, tags: Optional[List[str]]=None) -> str:
-    t = f"{severity_icon(severity)} *{escape_md(summary)}*"
-    if tags:
-        t += " " + " ".join(f"#{escape_md(x)}" for x in tags)
-    if details:
-        pretty = json.dumps(details, indent=2, ensure_ascii=False)
-        t += f"\n*Details:*\n```\n{pretty}\n```"
-    return t
 
 # ================= Telegram handlers =====================
 
@@ -93,20 +83,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat is None:
         return
     added = add_admin(chat.id, user.username if user else None)
-    if added:
-        await update.message.reply_text("✅ Registered. You will now receive SOC alerts here.")
-    else:
-        await update.message.reply_text("⚡ You are already registered to receive SOC alerts here.")
+    await update.message.reply_text(
+        "✅ Registered. You will now receive SOC alerts here." if added else
+        "⚡ You are already registered to receive SOC alerts here."
+    )
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat is None:
         return
     removed = remove_admin(chat.id)
-    if removed:
-        await update.message.reply_text("🛑 Removed. You will no longer receive SOC alerts here.")
-    else:
-        await update.message.reply_text("ℹ️ You were not registered.")
+    await update.message.reply_text(
+        "🛑 Removed. You will no longer receive SOC alerts here." if removed else
+        "ℹ️ You were not registered."
+    )
 
 async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -119,7 +109,7 @@ async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     lines = [f"• {a.get('username') or 'unknown'} — `{a['chat_id']}`" for a in admins]
     txt = "👥 *Registered Admins:*\n" + "\n".join(lines)
-    await update.message.reply_text(txt, parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(escape_md(txt), parse_mode=ParseMode.MARKDOWN_V2)
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -133,17 +123,15 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     for cid in targets:
         try:
-            await context.bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
+            await context.bot.send_message(chat_id=cid, text=escape_md(text), parse_mode=ParseMode.MARKDOWN_V2)
         except Exception:
             pass
     await update.message.reply_text("✅ Test alert broadcasted.")
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
     chat = update.effective_chat
     if chat is None:
         return
-    
     help_text = (
         "🛡️ *SOC Bot Commands:*\n\n"
         "/start - Register yourself to receive SOC alerts.\n"
@@ -152,8 +140,15 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/testalert - Send a test alert to all registered admins. (Super admins only)\n"
         "/help - Show this help message.\n"
     )
-
     await update.message.reply_text(escape_md(help_text), parse_mode=ParseMode.MARKDOWN_V2)
+
+# ================= FastAPI for Render port detection ==================
+
+api = FastAPI(title="SOC Bot Health Check")
+
+@api.get("/health")
+async def health():
+    return {"ok": True}
 
 # ===================== Main ==============================
 
@@ -167,7 +162,14 @@ async def main():
     await tg_app.initialize()
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
-    await asyncio.Event().wait()  # Keep running
+
+    # Run FastAPI server on port 8080 for Render
+    async def run_uvicorn():
+        config = uvicorn.Config(api, host="0.0.0.0", port=8080, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    await asyncio.gather(run_uvicorn(), asyncio.Event().wait())
 
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
