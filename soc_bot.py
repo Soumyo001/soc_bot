@@ -75,6 +75,12 @@ def escape_md(text: str) -> str:
         text = text.replace(ch, f"\\{ch}")
     return text
 
+def is_admin(user_id: int) -> bool:
+    """Check if a user is an admin (super admin or registered in admins.json)."""
+    if user_id in SUPER_ADMIN_IDS:
+        return True
+    return user_id in list_admin_chat_ids()
+
 # ================= Telegram handlers =====================
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,8 +99,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
+    user = update.effective_user
     chat = update.effective_chat
     if not chat:
+        return
+    if not is_admin(user.id):
+        await update.message.reply_text("❌ You are not authorized to use this command.")
         return
     removed = remove_admin(chat.id)
     await update.message.reply_text(
@@ -106,7 +116,7 @@ async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
     user = update.effective_user
-    if user and user.id not in SUPER_ADMIN_IDS:
+    if not is_admin(user.id):
         await update.message.reply_text("❌ Admin-only command.")
         return
     admins = read_admins()
@@ -121,7 +131,7 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
     user = update.effective_user
-    if user and user.id not in SUPER_ADMIN_IDS:
+    if not is_admin(user.id):
         await update.message.reply_text("❌ Admin-only command.")
         return
     text = "🔥 *Test Alert from SOC Bot*"
