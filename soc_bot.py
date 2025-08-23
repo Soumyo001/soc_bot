@@ -83,24 +83,33 @@ def get_receive_mode() -> bool:
         return False
 
 # ----------------- Formatting helpers -----------------
-def escape_md(text: str) -> str:
+def escape_md_fragment(text: str) -> str:
+    """Escape for MarkdownV2, for dynamic fragments only (NOT whole message)."""
     for ch in r"\_*[]()~`>#+-=|{}.!":
         text = text.replace(ch, f"\\{ch}")
     return text
 
-def format_alert(summary: str, severity: int, details: Optional[Dict[str, Any]] = None, tags: Optional[List[str]] = None) -> str:
+def format_alert(summary: str, severity: int,
+                 details: Optional[Dict[str, Any]] = None,
+                 tags: Optional[List[str]] = None) -> str:
     sev = max(0, min(10, int(severity or 5)))
     icons = ["🟢","🟢","🟢","🟡","🟡","🟡","🟠","🟠","🔴","🔴","🔥"]
-    t = f"{icons[sev]} *{escape_md(summary)}*"
+    # Escape only user-provided fields
+    t = f"{icons[sev]} *{escape_md_fragment(str(summary))}*"
     if tags:
-        t += " " + " ".join(f"#{escape_md(str(x))}" for x in tags)
-    if details:
+        safe_tags = " ".join(f"#{escape_md_fragment(str(x))}" for x in tags)
+        t += f" {safe_tags}"
+    if details is not None:
         pretty = json.dumps(details, indent=2, ensure_ascii=False)
-        # put details in backticks block but don't over-escape
-        t += f"\n*Details:*\n```\n{pretty}\n```"
+        # Put raw JSON inside code block so we don't need to escape inside
+        t += f"\n*Details:*\n```json\n{pretty}\n```"
     return t
 
 # ----------------- Telegram handlers (bot) -----------------
+
+def _is_admin(chat_id: int) -> bool:
+    return chat_id in set(list_admin_chat_ids())
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
@@ -110,6 +119,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     added = add_admin(chat.id, user.username if user else None)
     await update.message.reply_text("✅ Registered." if added else "ℹ️ Already registered.")
+    await cmd_help(update=update, context=context)
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -127,9 +137,13 @@ async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not admins:
         await update.message.reply_text("No admins registered yet.")
         return
-    lines = [f"• {a.get('username') or 'unknown'} — `{a['chat_id']}`" for a in admins]
+    lines = []
+    for a in admins:
+        uname = escape_md_fragment(a.get("username") or "unknown")
+        lines.append(f"• {uname} — `{a['chat_id']}`")
     txt = "👥 *Registered Admins:*\n" + "\n".join(lines)
-    await update.message.reply_text(escape_md(txt), parse_mode=ParseMode.MARKDOWN_V2)
+    # Do NOT escape the whole message; only fragments were escaped above
+    await update.message.reply_text(txt, parse_mode=ParseMode.MARKDOWN_V2)
 
 async def cmd_receive_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Enable continuous ingestion
@@ -137,6 +151,12 @@ async def cmd_receive_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat = update.effective_chat
     if not chat:
+        return
+    if not _is_admin(chat.id):
+        await update.message.reply_text("❌ Only registered admins can enable receive mode.")
+        return
+    if get_receive_mode() == True:
+        await update.message.reply_text("⚠️ Receive mode already ENABLED. ")
         return
     set_receive_mode(True)
     await update.message.reply_text("✅ Receive mode ENABLED. Incoming suspicious alerts will be forwarded to admins.")
@@ -148,17 +168,22 @@ async def cmd_stop_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if not chat:
         return
+    if not _is_admin(chat.id):
+        await update.message.reply_text("❌ Only registered admins can disable receive mode.")
+        return
+    if get_receive_mode() == False:
+        await update.message.reply_text("⚠️ Receive mode already DISABLED. ")
+        return
     set_receive_mode(False)
     await update.message.reply_text("🛑 Receive mode DISABLED. Incoming alerts will NOT be forwarded.")
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-    summary = "Test alert from SOC Bot"
-    text = format_alert(summary, 6, {"demo": True}, ["TEST"])
+    text = format_alert("Test alert from SOC Bot", 6, {"demo": True}, ["TEST"])
     for cid in list_admin_chat_ids():
         try:
-            await context.bot.send_message(chat_id=cid, text=escape_md(text), parse_mode=ParseMode.MARKDOWN_V2)
+            await context.bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
         except Exception:
             pass
     await update.message.reply_text("✅ Test alert sent to all admins.")
@@ -168,8 +193,9 @@ async def cmd_show_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     mode = get_receive_mode()
     admins = read_admins()
+    # Only escape dynamic parts if needed; here it's static text + numbers.
     state = f"📊 *Current State:*\n\nReceive mode: {'✅ ON' if mode else '❌ OFF'}\nAdmins: {len(admins)}"
-    await update.message.reply_text(escape_md(state), parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(state, parse_mode=ParseMode.MARKDOWN_V2)
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -186,10 +212,12 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(parts) < 2:
         await update.message.reply_text("⚠️ Usage: /broadcast <message>")
         return
-    body = parts[1].strip()
+    body = escape_md_fragment(parts[1].strip())
     for cid in admins:
         try:
-            await context.bot.send_message(chat_id=cid, text=escape_md(body), parse_mode=ParseMode.MARKDOWN_V2)
+            if cid == chat.id:
+                continue
+            await context.bot.send_message(chat_id=cid, text=body, parse_mode=ParseMode.MARKDOWN_V2)
         except Exception:
             pass
     await update.message.reply_text("✅ Broadcast sent.")
@@ -204,12 +232,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/admins - List all registered admins.\n"
         "/receive_alert - ENABLE continuous forwarding of suspicious alerts (admins only).\n"
         "/stop_receive - DISABLE continuous forwarding of suspicious alerts.\n"
-        "/show_state - Show the state of the current alert receive mode\n"
         "/testalert - Send a test alert to all admins.\n"
         "/broadcast <msg> - Send a custom message to all admins (admins only).\n"
+        "/show_state - Show receive mode and admin count.\n"
         "/help - Show this message.\n"
     )
-    await update.message.reply_text(escape_md(help_text), parse_mode=ParseMode.MARKDOWN_V2)
+    # Static content — safe to send as-is with MarkdownV2
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
 
 # ----------------- FastAPI app (runs in separate process) -----------------
 api = FastAPI(title="SOC Bot Ingest API")
@@ -218,9 +247,10 @@ api = FastAPI(title="SOC Bot Ingest API")
 async def health():
     return {"ok": True}
 
-# Accepts JSON POSTs from Wazuh/TheHive/your scripts
+# Accepts JSON POSTs from Wazuh/TheHive/custom scripts
 @api.post("/v1/ingest")
 async def ingest(request: Request, x_api_key: str = Header(None)):
+    # AuthN: only trusted systems with the shared API key
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(403, "Forbidden: invalid API key")
 
@@ -243,7 +273,7 @@ async def ingest(request: Request, x_api_key: str = Header(None)):
     results = []
     for cid in list_admin_chat_ids():
         try:
-            await bot.send_message(chat_id=cid, text=escape_md(text), parse_mode=ParseMode.MARKDOWN_V2)
+            await bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
             results.append({"chat_id": cid, "status": "sent"})
         except Exception as e:
             results.append({"chat_id": cid, "status": "error", "error": str(e)})
