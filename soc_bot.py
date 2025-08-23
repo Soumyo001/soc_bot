@@ -105,7 +105,7 @@ def format_alert(summary: str, severity: int,
         t += f"\n*Details:*\n```json\n{pretty}\n```"
     return t
 
-# ----------------- Telegram handlers (bot) -----------------
+# ----------------- Telegram handlers (bot) -----------------a
 
 def _is_admin(chat_id: int) -> bool:
     return chat_id in set(list_admin_chat_ids())
@@ -118,7 +118,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not chat:
         return
     added = add_admin(chat.id, user.username if user else None)
-    if not added:
+    if added:
         await update.message.reply_text(f"✅ Registered user: {user.username}")
         await cmd_help(update=update, context=context)
     else:
