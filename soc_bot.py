@@ -70,7 +70,7 @@ def list_admin_chat_ids() -> List[int]:
 # ----------------- Receive-mode helpers -----------------
 
 def get_receive_mode(chat_id: int) -> bool:
-    admins = list_admin_chat_ids()
+    admins = read_admins()
     for a in admins:
         if a["chat_id"] == chat_id:
             return a["receive"]
