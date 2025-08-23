@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import signal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException, Header
 import uvicorn
 
-from telegram import Update
+from telegram import Update, Bot
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -17,18 +17,19 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 ADMIN_FILE = DATA_DIR / "admins.json"
+RECEIVE_MODE_FILE = DATA_DIR / "receive_mode.json"
 
 def load_env(name: str, default: Optional[str] = None) -> Optional[str]:
     v = os.environ.get(name)
-    if v is None:
-        return default
-    return v.strip()
+    return v.strip() if v else default
 
 BOT_TOKEN = load_env("BOT_TOKEN")
+API_KEY = load_env("API_KEY")  # for ingest authentication
+
 if not BOT_TOKEN:
     raise SystemExit("BOT_TOKEN is required (from BotFather). Put it in environment variables")
 
-# =================== Admin storage ========================
+# ----------------- Admin JSON helpers -----------------
 
 def read_admins() -> List[Dict[str, Any]]:
     if not ADMIN_FILE.exists():
@@ -42,7 +43,8 @@ def read_admins() -> List[Dict[str, Any]]:
 
 def write_admins(admins: List[Dict[str, Any]]) -> None:
     tmp = ADMIN_FILE.with_suffix(".json.tmp")
-    json.dump({"admins": admins}, tmp.open("w", encoding="utf-8"), indent=2)
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump({"admins": admins}, f, indent=2)
     tmp.replace(ADMIN_FILE)
 
 def add_admin(chat_id: int, username: Optional[str]) -> bool:
@@ -55,37 +57,59 @@ def add_admin(chat_id: int, username: Optional[str]) -> bool:
 
 def remove_admin(chat_id: int) -> bool:
     admins = read_admins()
-    n = len(admins)
-    admins = [a for a in admins if a["chat_id"] != chat_id]
-    if len(admins) == n:
+    new_admins = [a for a in admins if a["chat_id"] != chat_id]
+    if len(new_admins) == len(admins):
         return False
-    write_admins(admins)
-    return True
+    return write_admins(new_admins)
 
 def list_admin_chat_ids() -> List[int]:
     return [a["chat_id"] for a in read_admins()]
 
-# ================= Helpers =================
+# ----------------- Receive-mode helpers -----------------
+def set_receive_mode(enabled: bool) -> None:
+    tmp = RECEIVE_MODE_FILE.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump({"enabled": bool(enabled)}, f)
+    tmp.replace(RECEIVE_MODE_FILE)
 
+def get_receive_mode() -> bool:
+    if not RECEIVE_MODE_FILE.exists():
+        return False
+    try:
+        with RECEIVE_MODE_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return bool(data.get("enabled", False))
+    except Exception:
+        return False
+
+# ----------------- Formatting helpers -----------------
 def escape_md(text: str) -> str:
     for ch in r"\_*[]()~`>#+-=|{}.!":
         text = text.replace(ch, f"\\{ch}")
     return text
 
-# ================= Telegram handlers =====================
+def format_alert(summary: str, severity: int, details: Optional[Dict[str, Any]] = None, tags: Optional[List[str]] = None) -> str:
+    sev = max(0, min(10, int(severity or 5)))
+    icons = ["🟢","🟢","🟢","🟡","🟡","🟡","🟠","🟠","🔴","🔴","🔥"]
+    t = f"{icons[sev]} *{escape_md(summary)}*"
+    if tags:
+        t += " " + " ".join(f"#{escape_md(str(x))}" for x in tags)
+    if details:
+        pretty = json.dumps(details, indent=2, ensure_ascii=False)
+        # put details in backticks block but don't over-escape
+        t += f"\n*Details:*\n```\n{pretty}\n```"
+    return t
 
+# ----------------- Telegram handlers (bot) -----------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-    user = update.effective_user
     chat = update.effective_chat
+    user = update.effective_user
     if not chat:
         return
     added = add_admin(chat.id, user.username if user else None)
-    await update.message.reply_text(
-        "✅ Registered. You will now receive SOC alerts here." if added else
-        "⚡ You are already registered to receive SOC alerts here."
-    )
+    await update.message.reply_text("✅ Registered." if added else "ℹ️ Already registered.")
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -94,10 +118,7 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not chat:
         return
     removed = remove_admin(chat.id)
-    await update.message.reply_text(
-        "🛑 Removed. You will no longer receive SOC alerts here." if removed else
-        "ℹ️ You were not registered."
-    )
+    await update.message.reply_text("🛑 Removed." if removed else "ℹ️ You were not registered.")
 
 async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -110,20 +131,45 @@ async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = "👥 *Registered Admins:*\n" + "\n".join(lines)
     await update.message.reply_text(escape_md(txt), parse_mode=ParseMode.MARKDOWN_V2)
 
+async def cmd_receive_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Enable continuous ingestion
+    if not update.message:
+        return
+    chat = update.effective_chat
+    if not chat:
+        return
+    set_receive_mode(True)
+    await update.message.reply_text("✅ Receive mode ENABLED. Incoming suspicious alerts will be forwarded to admins.")
+
+async def cmd_stop_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Disable continuous ingestion
+    if not update.message:
+        return
+    chat = update.effective_chat
+    if not chat:
+        return
+    set_receive_mode(False)
+    await update.message.reply_text("🛑 Receive mode DISABLED. Incoming alerts will NOT be forwarded.")
+
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-    text = "🔥 *Test Alert from SOC Bot*"
-    targets = list_admin_chat_ids()
-    if not targets:
-        await update.message.reply_text("No recipients registered yet.")
-        return
-    for cid in targets:
+    summary = "Test alert from SOC Bot"
+    text = format_alert(summary, 6, {"demo": True}, ["TEST"])
+    for cid in list_admin_chat_ids():
         try:
-            await context.bot.send_message(chat_id=cid, text=escape_md(text), parse_mode=ParseMode.MARKDOWN_V2)
+            await context.bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
         except Exception:
             pass
-    await update.message.reply_text("✅ Test alert broadcasted.")
+    await update.message.reply_text("✅ Test alert sent to all admins.")
+
+async def cmd_show_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    mode = get_receive_mode()
+    admins = read_admins()
+    state = f"📊 *Current State:*\n\nReceive mode: {'✅ ON' if mode else '❌ OFF'}\nAdmins: {len(admins)}"
+    await update.message.reply_text(escape_md(state), parse_mode=ParseMode.MARKDOWN_V2)
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -134,25 +180,19 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     admins = list_admin_chat_ids()
     if chat.id not in admins:
-        await update.message.reply_text("❌ Only registered admins can broadcast messages.")
+        await update.message.reply_text("❌ Only registered admins can broadcast.")
         return
-
-    text = update.message.text
-    if len(text.split(maxsplit=1)) < 2:
-        await update.message.reply_text("⚠️ Usage: /broadcast <your message>")
+    parts = (update.message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        await update.message.reply_text("⚠️ Usage: /broadcast <message>")
         return
-
-    # Extract the message to broadcast
-    message_to_send = text.split(maxsplit=1)[1]
-
+    body = parts[1].strip()
     for cid in admins:
         try:
-            if cid != chat.id:  # optionally skip sending to the sender themselves
-                await context.bot.send_message(chat_id=cid, text=escape_md(message_to_send), parse_mode=ParseMode.MARKDOWN_V2)
+            await context.bot.send_message(chat_id=cid, text=escape_md(body), parse_mode=ParseMode.MARKDOWN_V2)
         except Exception:
             pass
-
-    await update.message.reply_text("✅ Broadcast sent to all admins.")
+    await update.message.reply_text("✅ Broadcast sent.")
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -162,27 +202,62 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - Register yourself to receive SOC alerts.\n"
         "/stop - Unregister from receiving SOC alerts.\n"
         "/admins - List all registered admins.\n"
-        "/testalert - Send a test alert to all registered admins.\n"
-        "/broadcast <message> - Send a custom message to all admins.\n"
-        "/help - Show this help message.\n"
+        "/receive_alert - ENABLE continuous forwarding of suspicious alerts (admins only).\n"
+        "/stop_receive - DISABLE continuous forwarding of suspicious alerts.\n"
+        "/testalert - Send a test alert to all admins.\n"
+        "/broadcast <msg> - Send a custom message to all admins (admins only).\n"
+        "/help - Show this message.\n"
     )
     await update.message.reply_text(escape_md(help_text), parse_mode=ParseMode.MARKDOWN_V2)
 
-# ================= FastAPI for Render port detection ==================
-
-api = FastAPI(title="SOC Bot Health Check")
+# ----------------- FastAPI app (runs in separate process) -----------------
+api = FastAPI(title="SOC Bot Ingest API")
 
 @api.get("/health")
 async def health():
     return {"ok": True}
 
-# ===================== Main ==============================
+# Accepts JSON POSTs from Wazuh/TheHive/your scripts
+@api.post("/v1/ingest")
+async def ingest(request: Request, x_api_key: str = Header(None)):
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(403, "Forbidden: invalid API key")
 
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+
+    summary = payload.get("summary", "Alert")
+    severity = payload.get("severity", 5)
+    details = payload.get("details")
+    tags = payload.get("tags")
+
+    if not get_receive_mode():
+        return {"accepted": True, "forwarded": False, "reason": "receive_mode_disabled"}
+
+    bot = Bot(BOT_TOKEN)
+    text = format_alert(summary, severity, details, tags if isinstance(tags, list) else None)
+
+    results = []
+    for cid in list_admin_chat_ids():
+        try:
+            bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
+            results.append({"chat_id": cid, "status": "sent"})
+        except Exception as e:
+            results.append({"chat_id": cid, "status": "error", "error": str(e)})
+
+    return {"accepted": True, "forwarded": True, "results": results}
+
+# ===================== Main ==============================
 async def main():
     tg_app = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("stop", cmd_stop))
     tg_app.add_handler(CommandHandler("admins", cmd_admins))
+    tg_app.add_handler(CommandHandler("receive_alert", cmd_receive_alert))
+    tg_app.add_handler(CommandHandler("stop_receive", cmd_stop_receive))
+    tg_app.add_handler(CommandHandler("show_state", cmd_show_state))
     tg_app.add_handler(CommandHandler("testalert", cmd_testalert))
     tg_app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     tg_app.add_handler(CommandHandler("help", cmd_help))
@@ -193,7 +268,6 @@ async def main():
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
 
-    # Run FastAPI server on port 8080 for Render
     async def run_uvicorn():
         config = uvicorn.Config(api, host="0.0.0.0", port=8080, log_level="info")
         server = uvicorn.Server(config)
