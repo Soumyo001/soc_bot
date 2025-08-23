@@ -118,7 +118,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not chat:
         return
     added = add_admin(chat.id, user.username if user else None)
-    await update.message.reply_text("✅ Registered." if added else "ℹ️ Already registered.")
+    await update.message.reply_text(f"✅ Registered user: {user.username}" if added else "ℹ️ Already registered.")
     await cmd_help(update=update, context=context)
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -238,7 +238,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help - Show this message.\n"
     )
     # Static content — safe to send as-is with MarkdownV2
-    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(escape_md_fragment(help_text), parse_mode=ParseMode.MARKDOWN_V2)
 
 # ----------------- FastAPI app (runs in separate process) -----------------
 api = FastAPI(title="SOC Bot Ingest API")
