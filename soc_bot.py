@@ -242,7 +242,7 @@ async def ingest(request: Request, x_api_key: str = Header(None)):
     results = []
     for cid in list_admin_chat_ids():
         try:
-            bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
+            bot.send_message(chat_id=cid, text=escape_md(text), parse_mode=ParseMode.MARKDOWN_V2)
             results.append({"chat_id": cid, "status": "sent"})
         except Exception as e:
             results.append({"chat_id": cid, "status": "error", "error": str(e)})
