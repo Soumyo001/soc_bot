@@ -192,7 +192,7 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Only registered admins can send alert.")
         return
     text = format_alert("Test alert from SOC Bot", 6, {"demo": True}, ["TEST"])
-    for cid in list_admin_chat_ids():
+    for cid in admins:
         try:
             await context.bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
         except Exception:
