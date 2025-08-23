@@ -184,6 +184,13 @@ async def cmd_stop_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
+    chat = update.effective_chat
+    if not chat:
+        return
+    admins = list_admin_chat_ids()
+    if chat.id not in admins:
+        await update.message.reply_text("❌ Only registered admins can send alert.")
+        return
     text = format_alert("Test alert from SOC Bot", 6, {"demo": True}, ["TEST"])
     for cid in list_admin_chat_ids():
         try:
