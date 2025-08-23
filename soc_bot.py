@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import signal
+import re
 
 from fastapi import FastAPI, Request, HTTPException, Header
 import uvicorn
@@ -239,6 +240,8 @@ async def ingest(request: Request, x_api_key: str = Header(None)):
 
     bot = Bot(BOT_TOKEN)
     text = format_alert(summary, severity, details, tags if isinstance(tags, list) else None)
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
+    text = re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
 
     results = []
     for cid in list_admin_chat_ids():
