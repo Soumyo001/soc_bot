@@ -73,7 +73,7 @@ def get_receive_mode(chat_id: int) -> bool:
     admins = read_admins()
     for a in admins:
         if a["chat_id"] == chat_id:
-            return a["receive"]
+            return bool(a["receive"])
     # return chat_id in get_receiving_admins()
 
 def set_admin_receive(chat_id: int, enabled: bool) -> bool:
