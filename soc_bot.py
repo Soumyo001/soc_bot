@@ -158,7 +158,7 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = format_alert(summary, 6, {"demo": True}, ["TEST"])
     for cid in list_admin_chat_ids():
         try:
-            await context.bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
+            await context.bot.send_message(chat_id=cid, text=escape_md(text), parse_mode=ParseMode.MARKDOWN_V2)
         except Exception:
             pass
     await update.message.reply_text("✅ Test alert sent to all admins.")
@@ -204,6 +204,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/admins - List all registered admins.\n"
         "/receive_alert - ENABLE continuous forwarding of suspicious alerts (admins only).\n"
         "/stop_receive - DISABLE continuous forwarding of suspicious alerts.\n"
+        "/show_state - Show the state of the current alert receive mode\n"
         "/testalert - Send a test alert to all admins.\n"
         "/broadcast <msg> - Send a custom message to all admins (admins only).\n"
         "/help - Show this message.\n"
