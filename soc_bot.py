@@ -98,7 +98,7 @@ def format_alert(summary: str, severity: int,
     t = f"{icons[sev]} {escape_md_fragment(f"*{str(summary)}*")}"
     if tags:
         safe_tags = " ".join(f"{escape_md_fragment(f"#{str(x)}")}" for x in tags)
-        t += f" {safe_tags}"
+        t += f" \n{safe_tags}"
     if details is not None:
         pretty = json.dumps(details, indent=2, ensure_ascii=False)
         # Put raw JSON inside code block so we don't need to escape inside
