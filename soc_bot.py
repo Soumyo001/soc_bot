@@ -118,8 +118,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not chat:
         return
     added = add_admin(chat.id, user.username if user else None)
-    await update.message.reply_text(f"✅ Registered user: {user.username}" if added else "ℹ️ Already registered.")
-    await cmd_help(update=update, context=context)
+    if not added:
+        await update.message.reply_text(f"✅ Registered user: {user.username}")
+        await cmd_help(update=update, context=context)
+    else:
+        await update.message.reply_text("ℹ️ Already registered.")
+        
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
