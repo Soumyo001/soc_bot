@@ -17,7 +17,6 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 ADMIN_FILE = DATA_DIR / "admins.json"
-RECEIVE_MODE_FILE = DATA_DIR / "receive_mode.json"
 
 def load_env(name: str, default: Optional[str] = None) -> Optional[str]:
     v = os.environ.get(name)
@@ -51,9 +50,12 @@ def add_admin(chat_id: int, username: Optional[str]) -> bool:
     admins = read_admins()
     if any(a["chat_id"] == chat_id for a in admins):
         return False
-    admins.append({"chat_id": chat_id, "username": username})
+    admins.append({"chat_id": chat_id, "username": username, "receive": False})
     write_admins(admins)
     return True
+
+def get_receiving_admins() -> List[int]:
+    return [a["chat_id"] for a in read_admins() if a.get("receive", False)]
 
 def remove_admin(chat_id: int) -> bool:
     admins = read_admins()
@@ -66,21 +68,35 @@ def list_admin_chat_ids() -> List[int]:
     return [a["chat_id"] for a in read_admins()]
 
 # ----------------- Receive-mode helpers -----------------
-def set_receive_mode(enabled: bool) -> None:
-    tmp = RECEIVE_MODE_FILE.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump({"enabled": bool(enabled)}, f)
-    tmp.replace(RECEIVE_MODE_FILE)
 
-def get_receive_mode() -> bool:
-    if not RECEIVE_MODE_FILE.exists():
-        return False
-    try:
-        with RECEIVE_MODE_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-            return bool(data.get("enabled", False))
-    except Exception:
-        return False
+def get_receive_mode(chat_id: int) -> bool:
+    return chat_id in get_receiving_admins()
+
+def set_admin_receive(chat_id: int, enabled: bool) -> bool:
+    admins = read_admins()
+    changed = False
+    for a in admins:
+        if a["chat_id"] == chat_id:
+            a["receive"] = enabled
+            changed = True
+    if changed:
+        write_admins(admins)
+    return changed
+
+async def toggle_receive(update: Update, context: ContextTypes.DEFAULT_TYPE, enable: bool):
+    if not update.message:
+        return
+    chat = update.effective_chat
+    if not chat or not _is_admin(chat.id):
+        await update.message.reply_text(f"❌ Only registered admins can {"enable" if enable else "disable"} receive mode.")
+        return
+    if get_receive_mode(chat.id) == enable:
+        await update.message.reply_text(f"⚠️ Receive mode already {"ENABLED" if enable else "DISABLED"}.")
+        return
+    set_admin_receive(chat.id, enable)
+    await update.message.reply_text(
+        "✅ You will now receive incoming suspicious alerts.\nUse /stop_receive to disable." if enable else "🛑 You will no longer receive alerts."
+    )
 
 # ----------------- Formatting helpers -----------------
 def escape_md_fragment(text: str) -> str:
@@ -150,36 +166,10 @@ async def cmd_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt, parse_mode=ParseMode.MARKDOWN_V2)
 
 async def cmd_receive_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Enable continuous ingestion
-    if not update.message:
-        return
-    chat = update.effective_chat
-    if not chat:
-        return
-    if not _is_admin(chat.id):
-        await update.message.reply_text("❌ Only registered admins can enable receive mode.")
-        return
-    if get_receive_mode() == True:
-        await update.message.reply_text("⚠️ Receive mode already ENABLED. ")
-        return
-    set_receive_mode(True)
-    await update.message.reply_text("✅ Receive mode ENABLED. Incoming suspicious alerts will be forwarded to admins.")
+    await toggle_receive(update, context, True)
 
 async def cmd_stop_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Disable continuous ingestion
-    if not update.message:
-        return
-    chat = update.effective_chat
-    if not chat:
-        return
-    if not _is_admin(chat.id):
-        await update.message.reply_text("❌ Only registered admins can disable receive mode.")
-        return
-    if get_receive_mode() == False:
-        await update.message.reply_text("⚠️ Receive mode already DISABLED. ")
-        return
-    set_receive_mode(False)
-    await update.message.reply_text("🛑 Receive mode DISABLED. Incoming alerts will NOT be forwarded.")
+    await toggle_receive(update, context, False)
 
 async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -202,11 +192,14 @@ async def cmd_testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_show_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-    mode = get_receive_mode()
     admins = read_admins()
-    # Only escape dynamic parts if needed; here it's static text + numbers.
-    state = f"📊 *Current State:*\n\nReceive mode: {'✅ ON' if mode else '❌ OFF'}\nAdmins: {len(admins)}"
-    await update.message.reply_text(state, parse_mode=ParseMode.MARKDOWN_V2)
+    lines = []
+    for a in admins:
+        uname = escape_md_fragment(a.get("username") or "unknown")
+        status = "✅ ON" if a.get("receive", False) else "❌ OFF"
+        lines.append(f"• {uname} — `{a['chat_id']}` — {status}")
+    txt = "📊 *Current State:*\n\n" + "\n".join(lines)
+    await update.message.reply_text(txt, parse_mode=ParseMode.MARKDOWN_V2)
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -261,10 +254,8 @@ async def health():
 # Accepts JSON POSTs from Wazuh/TheHive/custom scripts
 @api.post("/v1/ingest")
 async def ingest(request: Request, x_api_key: str = Header(None)):
-    # AuthN: only trusted systems with the shared API key
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(403, "Forbidden: invalid API key")
-
     try:
         payload = await request.json()
     except Exception:
@@ -275,14 +266,15 @@ async def ingest(request: Request, x_api_key: str = Header(None)):
     details = payload.get("details")
     tags = payload.get("tags")
 
-    if not get_receive_mode():
-        return {"accepted": True, "forwarded": False, "reason": "receive_mode_disabled"}
+    receiving = get_receiving_admins()
+    if not receiving:
+        return {"accepted": True, "forwarded": False, "reason": "no_admins_in_receive_mode"}
 
     bot = Bot(BOT_TOKEN)
     text = format_alert(summary, severity, details, tags if isinstance(tags, list) else None)
 
     results = []
-    for cid in list_admin_chat_ids():
+    for cid in receiving:
         try:
             await bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.MARKDOWN_V2)
             results.append({"chat_id": cid, "status": "sent"})
