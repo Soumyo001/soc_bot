@@ -22,11 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 # -------------------- Install dependencies -----------
-RUN pip install --upgrade pip \
-    && pip install -r requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # -------------------- Copy project files -------------
-COPY soc_bot ./soc_bot
+COPY . .
 
 # -------------------- Expose port (optional, if API)-
 EXPOSE 8080
