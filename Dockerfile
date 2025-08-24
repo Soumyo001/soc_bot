@@ -29,7 +29,7 @@ RUN pip install --upgrade pip \
 COPY . .
 
 # -------------------- Expose port (optional, if API)-
-EXPOSE 8000
+EXPOSE 8080
 
 # -------------------- Start the bot -----------------
 CMD ["python", "soc_bot.py"]
