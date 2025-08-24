@@ -1,9 +1,9 @@
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
-from .storage import add_admin, remove_admin, list_admin_chat_ids, read_admins
-from .helpers.formatter import escape_md_fragment, format_alert
-from .helpers.bot_helper import toggle_receive
+from bot.storage import add_admin, remove_admin, list_admin_chat_ids, read_admins
+from bot.helpers.formatter import escape_md_fragment, format_alert
+from bot.helpers.bot_helper import toggle_receive
 
 
 
