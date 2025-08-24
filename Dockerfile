@@ -31,4 +31,4 @@ COPY . .
 EXPOSE 8080
 
 # -------------------- Start the bot -----------------
-CMD ["python", "soc_bot/soc_bot.py"]
+CMD ["python", "soc_bot.py"]
