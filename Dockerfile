@@ -26,7 +26,7 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 # -------------------- Copy project files -------------
-COPY . .
+COPY soc_bot ./soc_bot
 
 # -------------------- Expose port (optional, if API)-
 EXPOSE 8080
