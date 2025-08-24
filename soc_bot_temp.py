@@ -62,7 +62,8 @@ def remove_admin(chat_id: int) -> bool:
     new_admins = [a for a in admins if a["chat_id"] != chat_id]
     if len(new_admins) == len(admins):
         return False
-    return write_admins(new_admins)
+    write_admins(new_admins)
+    return True
 
 def list_admin_chat_ids() -> List[int]:
     return [a["chat_id"] for a in read_admins()]
