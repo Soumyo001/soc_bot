@@ -1,6 +1,6 @@
 import json
 from typing import List, Dict, Any, Optional
-from .config import ADMIN_FILE
+from bot.config import ADMIN_FILE
 
 def read_admins() -> List[Dict[str, Any]]:
     if not ADMIN_FILE.exists():
