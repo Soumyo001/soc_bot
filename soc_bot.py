@@ -3,7 +3,10 @@ import signal
 import uvicorn
 from telegram.ext import Application, CommandHandler
 from bot.config import BOT_TOKEN
-from bot.bot import cmd_admins, cmd_broadcast, cmd_help, cmd_receive_alert, cmd_show_state, cmd_start, cmd_stop, cmd_stop_receive, cmd_testalert
+from bot.bot import (
+    cmd_admins, cmd_broadcast, cmd_help, cmd_receive_alert,
+    cmd_show_state, cmd_start, cmd_stop, cmd_stop_receive, cmd_testalert
+)
 from bot.storage import list_admin_chat_ids
 from bot.api import api
 
@@ -26,6 +29,7 @@ async def main():
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
 
+    # --- Start FastAPI API ---
     async def run_uvicorn():
         config = uvicorn.Config(api, host="0.0.0.0", port=8080, log_level="info")
         server = uvicorn.Server(config)
