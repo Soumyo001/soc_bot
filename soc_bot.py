@@ -2,10 +2,10 @@ import asyncio
 import signal
 import uvicorn
 from telegram.ext import Application, CommandHandler
-from .bot.config import BOT_TOKEN
-from .bot.bot import cmd_admins, cmd_broadcast, cmd_help, cmd_receive_alert, cmd_show_state, cmd_start, cmd_stop, cmd_stop_receive, cmd_testalert
-from .bot.storage import list_admin_chat_ids
-from .bot.api import api
+from bot.config import BOT_TOKEN
+from bot.bot import cmd_admins, cmd_broadcast, cmd_help, cmd_receive_alert, cmd_show_state, cmd_start, cmd_stop, cmd_stop_receive, cmd_testalert
+from bot.storage import list_admin_chat_ids
+from bot.api import api
 
 
 async def main():
