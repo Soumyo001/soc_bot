@@ -1,4 +1,4 @@
-from ..storage import get_receiving_admins, write_admins, list_admin_chat_ids, read_admins
+from bot.storage import get_receiving_admins, write_admins, list_admin_chat_ids, read_admins
 from telegram import Update
 from telegram.ext import ContextTypes
 
