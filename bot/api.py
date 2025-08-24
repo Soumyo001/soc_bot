@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, Header
-from config import BOT_TOKEN, API_KEY
-from helpers.formatter import format_alert
-from storage import get_receiving_admins
+from .config import BOT_TOKEN, API_KEY
+from .helpers.formatter import format_alert
+from .storage import get_receiving_admins
 from telegram import Update, Bot
 from telegram.constants import ParseMode
 
