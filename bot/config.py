@@ -2,8 +2,8 @@ from pathlib import Path
 from typing import Optional
 import os
 
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
 ADMIN_FILE = DATA_DIR / "admins.json"
 
 def load_env(name: str, default: Optional[str] = None) -> Optional[str]:
