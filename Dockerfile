@@ -17,15 +17,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
-
-# -------------------- Copy dependency list -----------
-COPY requirements.txt .
-
+    
 # -------------------- Install dependencies -----------
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 # -------------------- Copy project files -------------
+COPY requirements.txt .
 COPY soc_bot ./soc_bot
 
 # -------------------- Expose port (optional, if API)-
